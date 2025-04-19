@@ -1,6 +1,6 @@
 import fs from 'fs'
 
-const configFileTemplate = 'mdx.config.json'
+export const configFileTemplate = 'mdx.config.json'
 // const defaults = JSON.parse(fs.readFileSync('src/initialize/defaults.json', 'utf8'))
 const defaultsTemplate = fs.readFileSync('src/initialize/defaults.json', 'utf8')
 
