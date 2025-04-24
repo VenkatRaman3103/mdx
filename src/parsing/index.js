@@ -3,73 +3,93 @@ import { identifier } from '../identifier/index.js'
 export function parser(data) {
 	const syntaxTree = []
 	let cursor = 0
+	let bulletPoints = []
+	let numberedPoints = []
 
 	while (cursor < data.length) {
 		const char = data[cursor]
 
-		if (identifier(char) == 'heading') {
-			let hash = data[cursor]
+		if (identifier(char) === 'heading') {
+			if (bulletPoints.length > 0) {
+				syntaxTree.push({
+					token: 'bullet-group',
+					value: `<ul>${bulletPoints.map((p) => p.tag).join('')}</ul>`,
+					children: bulletPoints,
+				})
+				bulletPoints = []
+			}
+
+			if (numberedPoints.length > 0) {
+				syntaxTree.push({
+					token: 'numbered-group',
+					value: `<ol>${numberedPoints.map((p) => p.tag).join('')}</ol>`,
+					children: numberedPoints,
+				})
+				numberedPoints = []
+			}
 
 			let headingLevel = 0
-
-			while (hash != ' ') {
-				cursor = cursor + 1
-				hash = data[cursor]
-				headingLevel = headingLevel + 1
+			while (data[cursor] === '#') {
+				headingLevel++
+				cursor++
 			}
-			cursor = cursor + 1
-
-			let headingaChar
-			let heading = data[cursor]
-
-			cursor = cursor + 1
-
-			while (headingaChar != '\n') {
-				heading = heading + data[cursor]
-				cursor = cursor + 1
-				headingaChar = data[cursor]
+			if (data[cursor] === ' ') cursor++
+			let heading = ''
+			while (cursor < data.length && data[cursor] !== '\n') {
+				heading += data[cursor]
+				cursor++
 			}
-
 			syntaxTree.push({
 				token: `h${headingLevel}`,
-				value: tag(heading, `h${headingLevel}`),
+				value: tag(heading.trim(), `h${headingLevel}`),
 			})
-		} else if (identifier(char) == 'bullet') {
+		} else if (identifier(char) === 'bullet') {
+			cursor += 2
 			let point = ''
-
-			// skip the first space
-			cursor = cursor + 2
-
-			while (data[cursor] != '\n') {
-				point = point + data[cursor]
-				cursor = cursor + 1
+			while (cursor < data.length && data[cursor] !== '\n') {
+				point += data[cursor]
+				cursor++
 			}
-			syntaxTree.push({
-				token: `bullet`,
-				value: point,
+			bulletPoints.push({
+				token: 'bullet',
+				value: point.trim(),
+				tag: `<li>${point.trim()}</li>`,
 			})
-		} else if (identifier(char) == 'number') {
-			let point = char
+		} else if (identifier(char) === 'number') {
+			const numberChar = char
+			cursor += 3
 			let pointValue = ''
-
-			// skip the dot and empty space
-			cursor = cursor + 3
-
-			while (data[cursor] != '\n') {
-				pointValue = pointValue + data[cursor]
-				cursor = cursor + 1
+			while (cursor < data.length && data[cursor] !== '\n') {
+				pointValue += data[cursor]
+				cursor++
 			}
-			syntaxTree.push({
-				token: `number`,
-				point: point,
-				value: pointValue,
+			numberedPoints.push({
+				token: 'number',
+				value: numberChar,
+				tag: `<li>${pointValue.trim()}</li>`,
 			})
 		}
-
-		cursor = cursor + 1
+		cursor++
 	}
 
-	console.log(syntaxTree)
+	if (bulletPoints.length > 0) {
+		syntaxTree.push({
+			token: 'bullet-group',
+			value: `<ul>${bulletPoints.map((p) => p.tag).join('')}</ul>`,
+			children: bulletPoints,
+		})
+	}
+
+	if (numberedPoints.length > 0) {
+		syntaxTree.push({
+			token: 'numbered-group',
+			value: `<ol>${numberedPoints.map((p) => p.tag).join('')}</ol>`,
+			children: numberedPoints,
+		})
+	}
+
+	console.log(JSON.stringify(syntaxTree, null, 4))
+	return syntaxTree
 }
 
 function tag(value, tag) {
