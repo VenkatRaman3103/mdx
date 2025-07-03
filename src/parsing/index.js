@@ -10,6 +10,10 @@ export function parser(data) {
 	let codeBlockLang = ''
 	let codeBlockContent = ''
 	let currentParagraph = ''
+	let inBlockquote = false
+	let blockquoteContent = ''
+	let definitionList = []
+	let inDefinitionList = false
 
 	const flushParagraph = () => {
 		if (currentParagraph.trim()) {
@@ -18,6 +22,22 @@ export function parser(data) {
 				value: `<p>${parseInlineElements(currentParagraph.trim())}</p>`,
 			})
 			currentParagraph = ''
+		}
+	}
+
+	const flushBlockquote = () => {
+		if (blockquoteContent.trim()) {
+			const paragraphs = blockquoteContent.trim().split('\n\n')
+			const quoteParagraphs = paragraphs
+				.map((p) => `<p>${parseInlineElements(p.replace(/\n/g, ' ').trim())}</p>`)
+				.join('')
+
+			syntaxTree.push({
+				token: 'blockquote',
+				value: `<blockquote>${quoteParagraphs}</blockquote>`,
+			})
+			blockquoteContent = ''
+			inBlockquote = false
 		}
 	}
 
@@ -40,22 +60,53 @@ export function parser(data) {
 		}
 	}
 
+	const flushDefinitionList = () => {
+		if (definitionList.length > 0) {
+			let dlHtml = '<dl>'
+			definitionList.forEach((item) => {
+				dlHtml += `<dt>${parseInlineElements(item.term)}</dt>`
+				dlHtml += `<dd>${parseInlineElements(item.definition)}</dd>`
+			})
+			dlHtml += '</dl>'
+
+			syntaxTree.push({
+				token: 'definition-list',
+				value: dlHtml,
+				children: definitionList,
+			})
+			definitionList = []
+			inDefinitionList = false
+		}
+	}
+
 	const flushTable = () => {
 		if (tableRows.length > 0) {
-			const [headerRow, ...bodyRows] = tableRows
 			let tableHtml = '<table>'
 
-			if (headerRow) {
+			const hasHeader = tableRows.length > 1
+
+			if (hasHeader) {
+				const [headerRow, ...bodyRows] = tableRows
 				tableHtml += '<thead><tr>'
 				headerRow.forEach((cell) => {
 					tableHtml += `<th>${parseInlineElements(cell)}</th>`
 				})
 				tableHtml += '</tr></thead>'
-			}
 
-			if (bodyRows.length > 0) {
+				if (bodyRows.length > 0) {
+					tableHtml += '<tbody>'
+					bodyRows.forEach((row) => {
+						tableHtml += '<tr>'
+						row.forEach((cell) => {
+							tableHtml += `<td>${parseInlineElements(cell)}</td>`
+						})
+						tableHtml += '</tr>'
+					})
+					tableHtml += '</tbody>'
+				}
+			} else {
 				tableHtml += '<tbody>'
-				bodyRows.forEach((row) => {
+				tableRows.forEach((row) => {
 					tableHtml += '<tr>'
 					row.forEach((cell) => {
 						tableHtml += `<td>${parseInlineElements(cell)}</td>`
@@ -76,20 +127,49 @@ export function parser(data) {
 		}
 	}
 
+	const flushAll = () => {
+		flushParagraph()
+		flushBlockquote()
+		flushLists()
+		flushDefinitionList()
+		flushTable()
+	}
+
 	while (cursor < data.length) {
 		const char = data[cursor]
 		const nextChar = data[cursor + 1] || ''
 		const prevChar = data[cursor - 1] || ''
 		const line = getLine(data, cursor)
 
-		// code blocks (```language)
-		if (char === '`' && nextChar === '`' && data[cursor + 2] === '`') {
-			flushParagraph()
-			flushLists()
-			flushTable()
+		if (inBlockquote && char === '>' && nextChar === ' ') {
+			cursor += 2
+			let quoteLine = ''
+			while (cursor < data.length && data[cursor] !== '\n') {
+				quoteLine += data[cursor]
+				cursor++
+			}
+			blockquoteContent += (blockquoteContent ? '\n' : '') + quoteLine
+			continue
+		}
 
+		if (inBlockquote && char === '>' && nextChar === '\n') {
+			blockquoteContent += '\n\n'
+			cursor += 2
+			continue
+		}
+
+		if (inBlockquote && char !== '>' && char !== '\n') {
+			flushBlockquote()
+		}
+
+		if (
+			(char === '`' && nextChar === '`' && data[cursor + 2] === '`') ||
+			(char === '~' && nextChar === '~' && data[cursor + 2] === '~')
+		) {
+			flushAll()
+
+			const delimiter = char
 			if (!inCodeBlock) {
-				// starting code block
 				cursor += 3
 				let lang = ''
 				while (cursor < data.length && data[cursor] !== '\n') {
@@ -104,7 +184,6 @@ export function parser(data) {
 				codeBlockContent = ''
 				continue
 			} else {
-				// ending code block
 				syntaxTree.push({
 					token: 'code-block',
 					value: `<pre><code class="language-${codeBlockLang}">${escapeHtml(codeBlockContent.trim())}</code></pre>`,
@@ -127,11 +206,66 @@ export function parser(data) {
 			continue
 		}
 
-		// headings
+		if ((line.startsWith('    ') || line.startsWith('\t')) && line.trim()) {
+			flushAll()
+
+			let codeContent = ''
+			while (cursor < data.length) {
+				const currentLine = getLine(data, cursor)
+				if (
+					(currentLine.startsWith('    ') || currentLine.startsWith('\t')) &&
+					currentLine.trim()
+				) {
+					const cleanLine = currentLine.startsWith('    ')
+						? currentLine.slice(4)
+						: currentLine.slice(1)
+					codeContent += (codeContent ? '\n' : '') + cleanLine
+					cursor = skipToNextLine(data, cursor)
+				} else if (!currentLine.trim()) {
+					codeContent += '\n'
+					cursor = skipToNextLine(data, cursor)
+				} else {
+					break
+				}
+			}
+
+			syntaxTree.push({
+				token: 'code-block',
+				value: `<pre><code>${escapeHtml(codeContent.trim())}</code></pre>`,
+				language: '',
+			})
+			continue
+		}
+
+		if (
+			cursor > 0 &&
+			(char === '=' || char === '-') &&
+			line.trim() &&
+			line
+				.trim()
+				.split('')
+				.every((c) => c === char)
+		) {
+			const prevLine = getPreviousLine(data, cursor)
+			if (prevLine && prevLine.trim()) {
+				if (
+					syntaxTree.length > 0 &&
+					syntaxTree[syntaxTree.length - 1].token === 'paragraph'
+				) {
+					const headerText = syntaxTree.pop().value.replace(/<\/?p>/g, '')
+					const level = char === '=' ? 1 : 2
+					syntaxTree.push({
+						token: `h${level}`,
+						value: tag(parseInlineElements(headerText), `h${level}`),
+					})
+				}
+				cursor = skipToNextLine(data, cursor)
+				continue
+			}
+		}
+
 		if (identifier(char) === 'heading' && (cursor === 0 || data[cursor - 1] === '\n')) {
-			flushParagraph()
-			flushLists()
-			flushTable()
+			flushAll()
 
 			let headingLevel = 0
 			while (data[cursor] === '#') {
@@ -144,6 +278,8 @@ export function parser(data) {
 				heading += data[cursor]
 				cursor++
 			}
+			heading = heading.replace(/\s*#+\s*$/, '')
+
 			syntaxTree.push({
 				token: `h${headingLevel}`,
 				value: tag(parseInlineElements(heading.trim()), `h${headingLevel}`),
@@ -151,11 +287,8 @@ export function parser(data) {
 			continue
 		}
 
-		// horizontal rules (---, ***, ___)
 		if (isHorizontalRule(line)) {
-			flushParagraph()
-			flushLists()
-			flushTable()
+			flushAll()
 
 			syntaxTree.push({
 				token: 'hr',
@@ -165,11 +298,8 @@ export function parser(data) {
 			continue
 		}
 
-		// blockquotes
-		if (char === '>' && nextChar === ' ') {
-			flushParagraph()
-			flushLists()
-			flushTable()
+		if (char === '>' && nextChar === ' ' && !inBlockquote) {
+			flushAll()
 
 			cursor += 2
 			let quote = ''
@@ -177,38 +307,94 @@ export function parser(data) {
 				quote += data[cursor]
 				cursor++
 			}
-			syntaxTree.push({
-				token: 'blockquote',
-				value: `<blockquote><p>${parseInlineElements(quote.trim())}</p></blockquote>`,
-			})
+			blockquoteContent = quote
+			inBlockquote = true
 			continue
 		}
 
-		// tables
-		if (char === '|' && line.includes('|')) {
-			flushParagraph()
-			flushLists()
+		if (
+			char !== ' ' &&
+			char !== '\t' &&
+			char !== '\n' &&
+			!line.includes(':') &&
+			cursor + 1 < data.length &&
+			getLine(data, cursor + line.length + 1)
+				.trim()
+				.startsWith(': ')
+		) {
+			flushAll()
 
-			if (line.match(/^\s*\|[\s\-\|:]*\|\s*$/)) {
+			const term = line.trim()
+			cursor = skipToNextLine(data, cursor)
+
+			const defLine = getLine(data, cursor)
+			if (defLine.trim().startsWith(': ')) {
+				const definition = defLine.trim().substring(2)
+				definitionList.push({ term, definition })
+				inDefinitionList = true
 				cursor = skipToNextLine(data, cursor)
 				continue
 			}
+		}
 
-			const cells = line
-				.split('|')
-				.map((cell) => cell.trim())
-				.filter((cell) => cell)
-			tableRows.push(cells)
-			cursor = skipToNextLine(data, cursor)
+		if (char === '|' && line.includes('|')) {
+			flushParagraph()
+			flushBlockquote()
+			flushLists()
+			flushDefinitionList()
+
+			let tempCursor = cursor
+			while (tempCursor < data.length) {
+				const currentLine = getLine(data, tempCursor)
+
+				if (!currentLine.trim()) {
+					tempCursor = skipToNextLine(data, tempCursor)
+					continue
+				}
+
+				if (!currentLine.includes('|')) {
+					break
+				}
+
+				if (currentLine.match(/^\s*\|?[\s\-\|:]+\|?\s*$/)) {
+					tempCursor = skipToNextLine(data, tempCursor)
+					continue
+				}
+
+				let cells = []
+
+				const trimmedLine = currentLine.trim()
+
+				let cellContent = trimmedLine
+				if (cellContent.startsWith('|')) {
+					cellContent = cellContent.slice(1)
+				}
+				if (cellContent.endsWith('|')) {
+					cellContent = cellContent.slice(0, -1)
+				}
+
+				cells = cellContent.split('|').map((cell) => cell.trim())
+
+				if (cells.length > 0 && cells.some((cell) => cell)) {
+					tableRows.push(cells)
+				}
+
+				tempCursor = skipToNextLine(data, tempCursor)
+			}
+
+			cursor = tempCursor
+
+			flushTable()
 			continue
 		}
 
-		// bullet points
 		if (
 			identifier(char, nextChar) === 'bullet' &&
 			(cursor === 0 || data[cursor - 1] === '\n')
 		) {
 			flushParagraph()
+			flushBlockquote()
+			flushDefinitionList()
 			flushTable()
 
 			cursor += 2
@@ -225,9 +411,10 @@ export function parser(data) {
 			continue
 		}
 
-		// numbered lists
 		if (/\d/.test(char) && data[cursor + 1] === '.' && data[cursor + 2] === ' ') {
 			flushParagraph()
+			flushBlockquote()
+			flushDefinitionList()
 			flushTable()
 
 			const numberChar = char
@@ -245,16 +432,12 @@ export function parser(data) {
 			continue
 		}
 
-		// empty lines
 		if (char === '\n' && nextChar === '\n') {
-			flushParagraph()
-			flushLists()
-			flushTable()
+			flushAll()
 			cursor++
 			continue
 		}
 
-		// regular text
 		if (char !== '\n') {
 			currentParagraph += char
 		} else if (currentParagraph.trim()) {
@@ -264,37 +447,38 @@ export function parser(data) {
 		cursor++
 	}
 
-	// flush any remaining content
-	flushParagraph()
-	flushLists()
-	flushTable()
+	flushAll()
 
 	return syntaxTree
 }
 
 function parseInlineElements(text) {
-	// bold (**text** or __text__)
+	text = text.replace(/\[\^([^\]]+)\]/g, '<sup><a href="#fn$1">$1</a></sup>')
+
+	text = text.replace(/\$\$([^$]+)\$\$/g, '<div class="math-display">$1</div>')
+	text = text.replace(/\$([^$]+)\$/g, '<span class="math-inline">$1</span>')
+
 	text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
 	text = text.replace(/__(.*?)__/g, '<strong>$1</strong>')
 
-	// italic (*text* or _text_)
 	text = text.replace(/\*(.*?)\*/g, '<em>$1</em>')
 	text = text.replace(/_(.*?)_/g, '<em>$1</em>')
 
-	// strikethrough (~~text~~)
 	text = text.replace(/~~(.*?)~~/g, '<del>$1</del>')
 
-	// inline code (`code`)
 	text = text.replace(/`([^`]+)`/g, '<code>$1</code>')
 
-	// links [text](url)
 	text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
 
-	// images ![alt](src)
 	text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" />')
 
-	// autolinks <url>
 	text = text.replace(/<(https?:\/\/[^>]+)>/g, '<a href="$1">$1</a>')
+
+	text = text.replace(/---/g, '&mdash;')
+
+	text = text.replace(/--/g, '&ndash;')
+
+	text = text.replace(/\.\.\./g, '&hellip;')
 
 	return text
 }
@@ -307,6 +491,23 @@ function getLine(data, cursor) {
 		i++
 	}
 	return line
+}
+
+function getPreviousLine(data, cursor) {
+	let lineStart = cursor
+	while (lineStart > 0 && data[lineStart - 1] !== '\n') {
+		lineStart--
+	}
+
+	if (lineStart === 0) return null
+
+	let prevLineStart = lineStart - 2
+	while (prevLineStart >= 0 && data[prevLineStart] !== '\n') {
+		prevLineStart--
+	}
+	prevLineStart++
+
+	return data.substring(prevLineStart, lineStart - 1)
 }
 
 function skipToNextLine(data, cursor) {

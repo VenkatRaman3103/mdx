@@ -5,7 +5,6 @@ export const configFileTemplate = 'mdx.config.json'
 const defaultsTemplate = fs.readFileSync('src/initialize/defaults.json', 'utf8')
 
 export function initialize() {
-	// intializing configuration file with default configurations
 	if (!fs.existsSync(configFileTemplate)) {
 		fs.writeFileSync(configFileTemplate, 'w')
 		console.log(`configuration file created successfully!\n${configFileTemplate}`)

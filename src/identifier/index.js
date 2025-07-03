@@ -1,33 +1,20 @@
 export function identifier(char, nextChar = '', prevChar = '') {
-	// headings
 	if (char === '#') return 'heading'
-
-	// bullet points
 	if (char === '-' && nextChar === ' ') return 'bullet'
 	if (char === '*' && nextChar === ' ') return 'bullet'
 	if (char === '+' && nextChar === ' ') return 'bullet'
-
-	// numbered lists
 	if (/\d/.test(char)) return 'number'
-
-	// code blocks
 	if (char === '`') return 'code'
-
-	// blockquotes
+	if (char === '~') return 'code'
 	if (char === '>' && nextChar === ' ') return 'blockquote'
-
-	// links and images
 	if (char === '[') return 'link_start'
 	if (char === '!') return 'image'
-
-	// emphasis
 	if (char === '*' || char === '_') return 'emphasis'
-
-	// tables
 	if (char === '|') return 'table'
-
-	// horizontal rules
 	if (char === '-' || char === '*' || char === '_') return 'hr'
-
+	if (char === '=' || char === '-') return 'setext_header'
+	if (char === ':' && nextChar === ' ') return 'definition'
+	if (char === '$') return 'math'
+	if (char === '[' && nextChar === '^') return 'footnote'
 	return 'text'
 }
