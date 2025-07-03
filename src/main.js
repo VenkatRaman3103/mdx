@@ -1,23 +1,30 @@
 import { configFileTemplate, initialize } from './initialize/index.js'
 import fs from 'fs'
 import { parser } from './parsing/index.js'
+import { interpreter } from './interpreter/index.js'
 
-const argumenst = process.argv
+const args = process.argv
 
-if (argumenst[2] == 'init') {
+if (args[2] == 'init') {
 	initialize()
 }
 
 function readTheFile(path) {
 	const fileType = fs.statSync(path)
-
 	if (fileType.isDirectory()) {
 		console.log('it should be a file')
 		return
 	}
 
 	const fileContent = fs.readFileSync(path, 'utf8')
-	parser(fileContent)
+	const parsedData = { children: parser(fileContent) }
+	const html = interpreter(parsedData)
+
+	console.log(html)
+
+	const outputPath = path.replace(/\.md$/, '.html')
+	fs.writeFileSync(outputPath, html)
+	console.log(`Generated: ${outputPath}`)
 }
 
 const getDefaultFolder = fs.readFileSync(configFileTemplate, 'utf8')

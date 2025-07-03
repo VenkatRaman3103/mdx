@@ -1,11 +1,24 @@
-# heading 1
+# My Blog Post
 
-## heading 2
+This is a **bold** paragraph with _italic_ text and `inline code`.
 
-- point 1
-- point 2
+## Features
 
-1. point 1
-2. point 2
+- Bullet points work
+- With **formatting** support
+- Including [links](https://example.com)
 
-### heading 3
+1. Numbered lists
+2. Also work perfectly
+
+> This is a blockquote
+> with multiple lines
+
+```javascript
+// Code blocks with syntax highlighting
+console.log('Hello, world!')
+```
+
+| Header 1 | Header 2 |
+| -------- | -------- |
+| Cell 1   | Cell 2   |
